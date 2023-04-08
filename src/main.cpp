@@ -2,9 +2,17 @@
 #include <Servo.h>
 #include <NewPing.h>
 
+// assinaturas de funcoes
+void medir_distancia_ultrassonico();
+void seguir_pessoa(int distancia);
+void monitorar_sensores_pir();
+int detectar_pessoa_esquerda();
+int detectar_pessoa_direita();
+
+
 //PWM inicia 130
 //Defines
-#define MAX_DISTANCE 200
+#define MAX_DISTANCE 50
 
 // Definindo as constantes para os pinos do motor 1 - Direita
 const int MOTOR1_PWMD_PIN = 12; 
@@ -32,6 +40,7 @@ unsigned long ultrasonicDistance = 0;
 
 // Criando a instância do servo motor 
 Servo ultrasonicServo; 
+int angleServo;
 
 // NewPing setup
 NewPing sonar(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN, MAX_DISTANCE);
@@ -66,69 +75,141 @@ void setup() {
   
   // Iniciando a comunicação serial para debug 
   Serial.begin(9600); 
+  angleServo = SERVO_ANGLE_INITIAL;
   
 } 
 
 void loop() { 
-  
-  // Lendo os valores dos sensores 
-  pirEValue = digitalRead(PIRE_PIN); 
-  pirDValue = digitalRead(PIRD_PIN); 
-
-  
-  // Se o sensor PIR direita detectar movimento 
-  if (pirDValue == HIGH) { 
-    // Movendo o carrinho para a direita 
-    analogWrite(MOTOR1_PWMD_PIN, 140);
-    analogWrite(MOTOR2_PWME_PIN, 200); 
-    Serial.println("Direita");
-  } 
-  // Se o sensor PIR Esquerda detectar movimento
-  else if (pirEValue == HIGH) { 
-    // Movendo o carrinho para a esquerda
-    analogWrite(MOTOR1_PWMD_PIN, 200); 
-    analogWrite(MOTOR2_PWME_PIN, 140); 
-    Serial.println("Esquerda");
-
-  } 
-  // Se nenhum sensor detectar movimento 
-  else { 
-    // Parando o carrinho
-    analogWrite(MOTOR1_PWMD_PIN, 0); 
-    analogWrite(MOTOR2_PWME_PIN, 0); 
-  }
-  // Movimentando o servo motor para a direita
-  for (int angle = SERVO_ANGLE_INITIAL; angle <= 180; angle += 5) {
-    ultrasonicServo.write(angle);
-    delay(50);
-    ultrasonicDistance = sonar.ping_cm();
-    if (ultrasonicDistance < 20) {
-    // Se o objeto estiver próximo, parar o carrinho
-      analogWrite(MOTOR1_PWMD_PIN, 0);
-      analogWrite(MOTOR2_PWME_PIN, 0);
-      break;
+    // Imprimindo os valores dos sensores na porta serial para debug
+    Serial.print("PIR_Esq: ");
+    Serial.print(pirEValue);
+    Serial.print(", PIR_Dir: ");
+    Serial.print(pirDValue);
+    Serial.print(", Ultrasonic: ");
+    Serial.print(ultrasonicDistance);
+    Serial.print(", Angulo: ");
+    Serial.print(angleServo);
+    medir_distancia_ultrassonico();
+    if (ultrasonicDistance > 0 && ultrasonicDistance < 50) {
+        // Pessoa ainda detectada, seguir pessoa
+        if(ultrasonicDistance > 20){
+            seguir_pessoa(ultrasonicDistance);
+        } else {
+            // Parar o carrinho
+            analogWrite(MOTOR1_PWMD_PIN, 0);
+            analogWrite(MOTOR2_PWME_PIN, 0);
+            Serial.print(", PESSOA CAPTURADA");
+            while(ultrasonicDistance < 20 && ultrasonicDistance > 0) {
+                medir_distancia_ultrassonico();
+                delay(500);
+            }
+        }
+    } else {
+        // Pessoa não detectada, voltar a monitorar os sensores PIR
+        monitorar_sensores_pir();
     }
-  }
-  // Movimentando o servo motor para a esquerda
-  for (int angle = 180; angle >= SERVO_ANGLE_INITIAL; angle -= 5) {
-    ultrasonicServo.write(angle);
-    delay(50);
-    ultrasonicDistance = sonar.ping_cm();
-    if (ultrasonicDistance < 20) {
-      // Se o objeto estiver próximo, parar o carrinho
-      analogWrite(MOTOR1_PWMD_PIN, 0);
-      analogWrite(MOTOR2_PWME_PIN, 0);
-      break;
-    }
-  }
-  // Imprimindo os valores dos sensores na porta serial para debug
-  Serial.print("PIR_Esq: ");
-  Serial.print(pirEValue);
-  Serial.print(", PIR_Dir: ");
-  Serial.print(pirDValue);
-  Serial.print(", Ultrasonic: ");
-  Serial.println(ultrasonicDistance);
-  // Aguardando 100 milissegundos para a próxima leitura dos sensores
-  delay(100);
+    // Aguardando 100 milissegundos para a próxima leitura dos sensores
+    delay(100);
+    Serial.print("\n");
 }
 
+void seguir_pessoa(int distancia) {
+    // Movimentar o carrinho para frente com a velocidade ajustada
+    analogWrite(MOTOR1_PWMD_PIN, 200);
+    analogWrite(MOTOR2_PWME_PIN, 200);
+    Serial.print(", Direcao: RETO ");
+}
+
+void monitorar_sensores_pir() {
+    pirEValue = digitalRead(PIRE_PIN); 
+    pirDValue = digitalRead(PIRD_PIN); 
+    // Ativar a monitoração dos sensores PIR
+    if(pirEValue == HIGH) detectar_pessoa_esquerda();
+    if(pirDValue == HIGH) detectar_pessoa_direita();
+
+    // Parar o carrinho
+    analogWrite(MOTOR1_PWMD_PIN, 0);
+    analogWrite(MOTOR2_PWME_PIN, 0);
+}
+
+int detectar_pessoa_esquerda() {
+    // Mover o servo motor para a esquerda
+    int detectado = 0;
+    angleServo = 180;
+    ultrasonicServo.write(angleServo);
+
+    // Aguardar alguns milissegundos para estabilização do servo
+    delay(500);
+
+    while (pirEValue == HIGH && angleServo != 90){
+        medir_distancia_ultrassonico();
+        pirEValue = digitalRead(PIRE_PIN);
+        if(angleServo > 90){
+            angleServo-=5;
+            ultrasonicServo.write(angleServo);
+            delay(100);
+        }
+        while(angleServo > 90){ // virando para Esquerda
+            medir_distancia_ultrassonico();
+            if(detectado == 1){
+                analogWrite(MOTOR1_PWMD_PIN, 200);
+                analogWrite(MOTOR2_PWME_PIN, 140); 
+                Serial.println("Direcao: ESQUERDA ");
+            }
+            angleServo-=5;
+            ultrasonicServo.write(angleServo);
+            delay(100);
+            if(ultrasonicDistance > 20) {
+                detectado = 1;
+            }
+        }
+        if(detectado == 1){
+            return detectado;
+        }
+    }
+    return detectado;
+        
+}
+
+int detectar_pessoa_direita() {
+    // Mover o servo motor para a direita
+    int detectado = 0;
+    angleServo = 0;
+    ultrasonicServo.write(angleServo);
+
+    // Aguardar alguns milissegundos para estabilização do servo
+    delay(500);
+
+    while (pirDValue == HIGH && angleServo != 90){
+        medir_distancia_ultrassonico();
+        pirDValue = digitalRead(PIRD_PIN);
+        if(angleServo < 90){
+            angleServo+=5;
+            ultrasonicServo.write(angleServo);
+            delay(100);
+        }
+        while(angleServo < 90){ // virando para direita
+            medir_distancia_ultrassonico();
+            if(detectado == 1){
+                analogWrite(MOTOR1_PWMD_PIN, 140);
+                analogWrite(MOTOR2_PWME_PIN, 200); 
+                Serial.println("Direcao: DIREITA ");
+            }
+            angleServo+=5;
+            ultrasonicServo.write(angleServo);
+            delay(100);
+            if(ultrasonicDistance > 20) {
+                detectado = 1;
+            }
+        }
+        if(detectado == 1){
+            return detectado;
+        }
+    }
+    return detectado;
+        
+}
+
+void medir_distancia_ultrassonico(){
+    ultrasonicDistance = sonar.ping_cm();
+}
